@@ -18,6 +18,9 @@ import * as Animatable from 'react-native-animatable';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTranslation } from 'react-i18next';
 import i18n from 'i18next';
+import * as Haptics from 'expo-haptics';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import Swipeable from 'react-native-gesture-handler/Swipeable';
 
 const { width, height } = Dimensions.get('window');
 
@@ -38,6 +41,15 @@ i18n.init({
         count: 'Count',
         reminder: 'Set Reminder',
         confirmDelete: 'Are you sure you want to delete this Zikr?',
+        error: 'Error',
+        zikrNameRequired: 'Zikr name is required',
+        targetRequired: 'Target is required',
+        invalidTarget: 'Please enter a valid number or "unlimited"',
+        confirmReset: 'Are you sure you want to reset the counter?',
+        statistics: 'Statistics',
+        todayCount: "Today's Count",
+        totalCount: 'Total Count',
+        bestStreak: 'Best Streak',
       },
     },
     ur: {
@@ -55,6 +67,15 @@ i18n.init({
         count: 'گنتی',
         reminder: 'یاد دہانی سیٹ کریں',
         confirmDelete: 'کیا آپ واقعی اس ذکر کو حذف کرنا چاہتے ہیں؟',
+        error: 'خرابی',
+        zikrNameRequired: 'ذکر کا نام درکار ہے',
+        targetRequired: 'ہدف درکار ہے',
+        invalidTarget: 'براہ کرم درست نمبر یا "unlimited" درج کریں',
+        confirmReset: 'کیا آپ واقعی کاؤنٹر کو دوبارہ ترتیب دینا چاہتے ہیں؟',
+        statistics: 'اعدادوشمار',
+        todayCount: 'آج کی گنتی',
+        totalCount: 'کل گنتی',
+        bestStreak: 'بہترین سلسلہ',
       },
     },
   },
@@ -76,6 +97,7 @@ export default function App() {
   const [reminderTime, setReminderTime] = useState(new Date());
   const [showReminderPicker, setShowReminderPicker] = useState(false);
   const [language, setLanguage] = useState('en');
+  const [statistics, setStatistics] = useState({});
 
   useEffect(() => {
     loadZikrs();
@@ -88,9 +110,13 @@ export default function App() {
   const loadZikrs = async () => {
     try {
       const savedZikrs = await AsyncStorage.getItem('zikrs');
+      const savedStats = await AsyncStorage.getItem('statistics');
+      
       if (savedZikrs) setZikrs(JSON.parse(savedZikrs));
+      if (savedStats) setStatistics(JSON.parse(savedStats));
     } catch (error) {
-      console.error('Failed to load Zikrs', error);
+      Alert.alert(t('error'), 'Failed to load data');
+      console.error('Failed to load data:', error);
     }
   };
 
@@ -105,6 +131,16 @@ export default function App() {
   const handleAddZikr = () => {
     if (!zikrName.trim()) {
       Alert.alert(t('error'), t('zikrNameRequired'));
+      return;
+    }
+
+    if (!zikrTarget.trim()) {
+      Alert.alert(t('error'), t('targetRequired'));
+      return;
+    }
+
+    if (zikrTarget !== 'unlimited' && isNaN(parseInt(zikrTarget, 10))) {
+      Alert.alert(t('error'), t('invalidTarget'));
       return;
     }
 
@@ -164,24 +200,58 @@ export default function App() {
     saveZikrs(updatedZikrs);
   };
 
-  const handleCount = () => {
+  const handleCount = async () => {
     if (selectedZikr.target === Infinity || count < selectedZikr.target) {
-      setCount((prev) => prev + 1);
-      const updatedZikrs = zikrs.map((zikr) =>
-        zikr.id === selectedZikr.id ? { ...zikr, count: zikr.count + 1 } : zikr
-      );
-      setZikrs(updatedZikrs);
-      saveZikrs(updatedZikrs);
+      try {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        
+        const newCount = count + 1;
+        setCount(newCount);
+        
+        const today = new Date().toISOString().split('T')[0];
+        const updatedStats = {
+          ...statistics,
+          [selectedZikr.id]: {
+            ...statistics[selectedZikr.id],
+            totalCount: (statistics[selectedZikr.id]?.totalCount || 0) + 1,
+            [today]: (statistics[selectedZikr.id]?.[today] || 0) + 1,
+          },
+        };
+        
+        setStatistics(updatedStats);
+        await AsyncStorage.setItem('statistics', JSON.stringify(updatedStats));
+
+        const updatedZikrs = zikrs.map((zikr) =>
+          zikr.id === selectedZikr.id ? { ...zikr, count: zikr.count + 1 } : zikr
+        );
+        setZikrs(updatedZikrs);
+        await AsyncStorage.setItem('zikrs', JSON.stringify(updatedZikrs));
+      } catch (error) {
+        console.error('Error updating count:', error);
+      }
     }
   };
 
   const handleReset = () => {
-    setCount(0);
-    const updatedZikrs = zikrs.map((zikr) =>
-      zikr.id === selectedZikr.id ? { ...zikr, count: 0 } : zikr
-    );
-    setZikrs(updatedZikrs);
-    saveZikrs(updatedZikrs);
+    Alert.alert(t('confirmReset'), t('confirmReset'), [
+      { text: t('cancel'), style: 'cancel' },
+      {
+        text: t('reset'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setCount(0);
+            const updatedZikrs = zikrs.map((zikr) =>
+              zikr.id === selectedZikr.id ? { ...zikr, count: 0 } : zikr
+            );
+            setZikrs(updatedZikrs);
+            await AsyncStorage.setItem('zikrs', JSON.stringify(updatedZikrs));
+          } catch (error) {
+            console.error('Error resetting count:', error);
+          }
+        },
+      },
+    ]);
   };
 
   const handleSelectZikr = (zikr) => {
@@ -206,98 +276,121 @@ export default function App() {
 
   const styles = getStyles(theme);
 
+  const renderStatistics = () => {
+    if (!selectedZikr) return null;
+
+    const stats = statistics[selectedZikr.id] || {};
+    const today = new Date().toISOString().split('T')[0];
+
+    return (
+      <View style={styles.statisticsContainer}>
+        <Text style={styles.statisticsTitle}>{t('statistics')}</Text>
+        <Text style={styles.statisticsText}>
+          {t('todayCount')}: {stats[today] || 0}
+        </Text>
+        <Text style={styles.statisticsText}>
+          {t('totalCount')}: {stats.totalCount || 0}
+        </Text>
+      </View>
+    );
+  };
+
   return (
-    <View style={styles.container}>
-      {selectedZikr ? (
-        <Animatable.View animation="fadeIn" style={styles.counterContainer}>
-          <Text style={styles.title}>{selectedZikr.name}</Text>
-          <Circle
-            progress={progress}
-            size={width * 0.7}
-            showsText
-            textStyle={styles.progressText}
-            color={theme === 'light' ? '#4CAF50' : '#81C784'}
-          />
-          <Text style={styles.countText}>{count}</Text>
-          <TouchableOpacity style={styles.button} onPress={handleCount}>
-            <Text style={styles.buttonText}>{t('count')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.resetButton} onPress={handleReset}>
-            <Text style={styles.resetButtonText}>{t('reset')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-            <Text style={styles.backButtonText}>{t('back')}</Text>
-          </TouchableOpacity>
-        </Animatable.View>
-      ) : (
-        <ScrollView style={styles.zikrListContainer}>
-          <Text style={styles.title}>{t('title')}</Text>
-          {zikrs.map((zikr) => (
-            <Animatable.View
-              key={zikr.id}
-              animation="fadeInUp"
-              style={styles.zikrItem}
-            >
-              <TouchableOpacity onPress={() => handleSelectZikr(zikr)}>
-                <Text style={styles.zikrName}>{zikr.name}</Text>
-                <Text style={styles.zikrCount}>{zikr.count}</Text>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <View style={styles.container}>
+        {selectedZikr ? (
+          <Animatable.View animation="fadeIn" style={styles.counterContainer}>
+            <Text style={styles.title}>{selectedZikr.name}</Text>
+            <Circle
+              progress={progress}
+              size={width * 0.7}
+              showsText
+              textStyle={styles.progressText}
+              color={theme === 'light' ? '#4CAF50' : '#81C784'}
+            />
+            <Text style={styles.countText}>{count}</Text>
+            <TouchableOpacity style={styles.button} onPress={handleCount}>
+              <Text style={styles.buttonText}>{t('count')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.resetButton} onPress={handleReset}>
+              <Text style={styles.resetButtonText}>{t('reset')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+              <Text style={styles.backButtonText}>{t('back')}</Text>
+            </TouchableOpacity>
+          </Animatable.View>
+        ) : (
+          <ScrollView style={styles.zikrListContainer}>
+            <Text style={styles.title}>{t('title')}</Text>
+            {zikrs.map((zikr) => (
+              <Animatable.View
+                key={zikr.id}
+                animation="fadeInUp"
+                style={styles.zikrItem}
+              >
+                <TouchableOpacity onPress={() => handleSelectZikr(zikr)}>
+                  <Text style={styles.zikrName}>{zikr.name}</Text>
+                  <Text style={styles.zikrCount}>{zikr.count}</Text>
+                </TouchableOpacity>
+                <View style={styles.actions}>
+                  <TouchableOpacity onPress={() => handleEditZikr(zikr)}>
+                    <Icon name="edit" size={24} color="#4CAF50" />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleDeleteZikr(zikr.id)}>
+                    <Icon name="delete" size={24} color="#f44336" />
+                  </TouchableOpacity>
+                </View>
+              </Animatable.View>
+            ))}
+            <TouchableOpacity style={styles.addButton} onPress={() => setIsFormVisible(true)}>
+              <Text style={styles.addButtonText}>{t('addZikr')}</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        )}
+
+        <Modal visible={isFormVisible} animationType="slide" transparent>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>{isEditMode ? t('editZikr') : t('addZikr')}</Text>
+              <TextInput
+                style={styles.input}
+                placeholder={t('zikrName')}
+                value={zikrName}
+                onChangeText={setZikrName}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder={t('target')}
+                value={zikrTarget}
+                onChangeText={setZikrTarget}
+                keyboardType="numeric"
+              />
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={isEditMode ? handleUpdateZikr : handleAddZikr}
+              >
+                <Text style={styles.modalButtonText}>{isEditMode ? t('update') : t('addZikr')}</Text>
               </TouchableOpacity>
-              <View style={styles.actions}>
-                <TouchableOpacity onPress={() => handleEditZikr(zikr)}>
-                  <Icon name="edit" size={24} color="#4CAF50" />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleDeleteZikr(zikr.id)}>
-                  <Icon name="delete" size={24} color="#f44336" />
-                </TouchableOpacity>
-              </View>
-            </Animatable.View>
-          ))}
-          <TouchableOpacity style={styles.addButton} onPress={() => setIsFormVisible(true)}>
-            <Text style={styles.addButtonText}>{t('addZikr')}</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      )}
-
-      <Modal visible={isFormVisible} animationType="slide" transparent>
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{isEditMode ? t('editZikr') : t('addZikr')}</Text>
-            <TextInput
-              style={styles.input}
-              placeholder={t('zikrName')}
-              value={zikrName}
-              onChangeText={setZikrName}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder={t('target')}
-              value={zikrTarget}
-              onChangeText={setZikrTarget}
-              keyboardType="numeric"
-            />
-            <TouchableOpacity
-              style={styles.modalButton}
-              onPress={isEditMode ? handleUpdateZikr : handleAddZikr}
-            >
-              <Text style={styles.modalButtonText}>{isEditMode ? t('update') : t('addZikr')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.modalButton} onPress={() => setIsFormVisible(false)}>
-              <Text style={styles.modalButtonText}>{t('cancel')}</Text>
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.modalButton} onPress={() => setIsFormVisible(false)}>
+                <Text style={styles.modalButtonText}>{t('cancel')}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
 
-      {showReminderPicker && (
-        <DateTimePicker
-          value={reminderTime}
-          mode="time"
-          is24Hour={true}
-          display="default"
-          onChange={handleSetReminder}
-        />
-      )}
-    </View>
+        {showReminderPicker && (
+          <DateTimePicker
+            value={reminderTime}
+            mode="time"
+            is24Hour={true}
+            display="default"
+            onChange={handleSetReminder}
+          />
+        )}
+
+        {selectedZikr && renderStatistics()}
+      </View>
+    </GestureHandlerRootView>
   );
 }
 
@@ -442,5 +535,25 @@ const getStyles = (theme) =>
       color: '#fff',
       fontWeight: 'bold',
       textAlign: 'center',
+    },
+    statisticsContainer: {
+      padding: 15,
+      marginVertical: 10,
+      backgroundColor: theme === 'light' ? '#f9f9f9' : '#1E1E1E',
+      borderRadius: 10,
+      elevation: 3,
+    },
+    statisticsTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      marginBottom: 10,
+      color: theme === 'light' ? '#000' : '#fff',
+      textAlign: 'right',
+    },
+    statisticsText: {
+      fontSize: 16,
+      color: theme === 'light' ? '#000' : '#fff',
+      textAlign: 'right',
+      marginVertical: 5,
     },
   });
